@@ -1,0 +1,21 @@
+# Python environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local secrets and runtime config
+.env
+.env.*
+!.env.example
+
+# Database artifacts
+*.db
+*.sqlite3
+nexusrail.db
+
+# Editor / OS
+.DS_Store
