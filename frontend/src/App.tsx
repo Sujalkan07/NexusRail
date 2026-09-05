@@ -1,325 +1,48 @@
-import { useEffect, useMemo, useState } from 'react';
-import { fetchDashboardOverview } from './api/dashboard';
-import { buildDashboardViewModel } from './data/dashboardViewModel';
-import { DashboardOverview, DashboardViewModel } from './types/dashboard';
-import { TimelineChart } from './components/TimelineChart';
-import { RecommendationDetails } from './components/RecommendationDetails';
-import { ApprovePanel } from './components/ApprovePanel';
+import { useEffect, useState } from 'react';
+import { approveRecommendation, fetchProductDashboard, ProductDashboard, Recommendation, rejectRecommendation, runOptimization } from './api/planning';
 
-const EMPTY_VIEW: DashboardViewModel = {
-  header: { title: 'NexusRail', subtitle: 'Operations control', systemMode: 'Review' },
-  summary: [],
-  sections: [],
-  blocks: [],
-  tasks: [],
-  trains: [],
-  approvals: { required: true, authRequired: true, status: 'pending_review', message: 'Awaiting review' },
-  details: { selectedTaskIds: [], explanation: 'No recommendation available yet.' },
-};
-
-type NavTab = 'overview' | 'maintenance' | 'train' | 'approvals';
+type Page = 'overview' | 'requests' | 'network' | 'planner' | 'recommendations' | 'conflicts' | 'approvals';
+const nav: { id: Page; label: string; group: string }[] = [
+  { id: 'overview', label: 'Overview', group: 'Control room' },
+  { id: 'requests', label: 'Maintenance requests', group: 'Maintenance' },
+  { id: 'network', label: 'Railway network', group: 'Operations' },
+  { id: 'planner', label: 'Block planner', group: 'Planning' },
+  { id: 'recommendations', label: 'Recommendations', group: 'Planning' },
+  { id: 'conflicts', label: 'Conflicts', group: 'Operations' },
+  { id: 'approvals', label: 'Approvals', group: 'Governance' },
+];
+const formatDate = (value: string) => new Date(value).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+const scoreTone = (score: number) => score >= 80 ? 'critical' : score >= 60 ? 'warning' : 'info';
 
 function App() {
-  const [snapshot, setSnapshot] = useState<DashboardOverview | null>(null);
+  const [page, setPage] = useState<Page>('overview');
+  const [data, setData] = useState<ProductDashboard | null>(null);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [selectedRequest, setSelectedRequest] = useState<number | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<NavTab>('overview');
-
-  const loadDashboard = () => {
-    setStatus('loading');
-    setErrorMessage('');
-
-    fetchDashboardOverview()
-      .then((data) => {
-        setSnapshot(data);
-        setStatus('ready');
-        if (data.recommendations?.blocks?.length) {
-          const firstBlockId = data.recommendations.blocks[0]?.block_id;
-          if (typeof firstBlockId === 'string') {
-            setSelectedBlockId(firstBlockId);
-          }
-        }
-      })
-      .catch((error: unknown) => {
-        setStatus('error');
-        setErrorMessage(error instanceof Error ? error.message : 'Failed to fetch operational data.');
-      });
-  };
-
-  useEffect(() => {
-    loadDashboard();
-  }, []);
-
-  const viewModel = useMemo(() => {
-    if (!snapshot) return EMPTY_VIEW;
-    return buildDashboardViewModel(snapshot, selectedBlockId);
-  }, [snapshot, selectedBlockId]);
-
-  const selectedBlock = viewModel.blocks.find((block) => block.id === selectedBlockId) ?? viewModel.blocks[0];
-
-  const isEmptyState = status === 'ready' && !viewModel.summary.length && !viewModel.blocks.length && !viewModel.tasks.length;
-
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div>
-          <div className="eyebrow">NexusRail Control</div>
-          <h1>{viewModel.header.title}</h1>
-        </div>
-        <div className="topbar-meta">
-          <span className="badge status-pill">{viewModel.header.systemMode}</span>
-          <span className="badge neutral">{viewModel.header.subtitle}</span>
-        </div>
-      </header>
-
-      {status === 'error' && (
-        <div className="error-banner" role="alert">
-          <span>Backend unavailable</span>
-          <button type="button" className="action retry" onClick={loadDashboard}>Retry</button>
-          <small>{errorMessage}</small>
-        </div>
-      )}
-
-      <aside className="sidebar">
-        <nav className="nav-list">
-          {['Overview', 'Maintenance', 'Train plan', 'Approvals'].map((label, index) => {
-            const values: NavTab[] = ['overview', 'maintenance', 'train', 'approvals'];
-            const isActive = activeTab === values[index];
-            return (
-              <button
-                key={label}
-                type="button"
-                className={`nav-item ${isActive ? 'active' : ''}`}
-                onClick={() => setActiveTab(values[index])}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <main className="content-grid">
-        {status === 'loading' ? (
-          <section className="panel loading-panel">
-            <div className="panel-header">
-              <h2>Operational data</h2>
-            </div>
-            <p>Loading operational data...</p>
-          </section>
-        ) : status === 'error' ? (
-          <section className="panel empty-panel">
-            <h2>Backend unavailable</h2>
-            <p>Unable to reach the NexusRail backend.</p>
-          </section>
-        ) : isEmptyState ? (
-          <section className="panel empty-panel">
-            <h2>No operational records available.</h2>
-          </section>
-        ) : (
-          <>
-            <section className="panel summary-panel">
-              <div className="panel-header">
-                <h2>System status</h2>
-              </div>
-              <div className="stats-grid">
-                {viewModel.summary.map((item) => (
-                  <article key={item.label} className="stat-card">
-                    <div className="stat-label">{item.label}</div>
-                    <div className="stat-value">{item.value}</div>
-                    <div className="stat-trend">{item.note}</div>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            {activeTab === 'overview' && (
-              <>
-                <section className="panel overview-panel">
-                  <div className="panel-header">
-                    <h2>Unified operational overview</h2>
-                  </div>
-                  <div className="overview-grid">
-                    <article>
-                      <h3>Sections</h3>
-                      <ul>
-                        {viewModel.sections.length ? viewModel.sections.map((section) => (
-                          <li key={section}>{section}</li>
-                        )) : <li>No operational records available.</li>}
-                      </ul>
-                    </article>
-                    <article>
-                      <h3>Priority summary</h3>
-                      <ul>
-                        {viewModel.tasks.length ? viewModel.tasks.slice(0, 4).map((task) => (
-                          <li key={task.id}>{task.name} · {task.priority}</li>
-                        )) : <li>No operational records available.</li>}
-                      </ul>
-                    </article>
-                  </div>
-                </section>
-
-                <section className="panel maintenance-panel">
-                  <div className="panel-header">
-                    <h2>Maintenance / task area</h2>
-                  </div>
-                  <ul className="task-list">
-                    {viewModel.tasks.length ? viewModel.tasks.map((task) => (
-                      <li key={task.id}>
-                        <span>{task.name}</span>
-                        <strong>{task.priority}</strong>
-                      </li>
-                    )) : <li>No operational records available.</li>}
-                  </ul>
-                </section>
-
-                <section className="panel priority-panel">
-                  <div className="panel-header">
-                    <h2>Priority / risk area</h2>
-                  </div>
-                  <ul className="risk-list">
-                    {viewModel.blocks.length ? viewModel.blocks.map((block) => (
-                      <li key={block.id}>
-                        <button type="button" className="block-link" onClick={() => setSelectedBlockId(block.id)}>
-                          {block.name}
-                        </button>
-                        <span>{block.priority}</span>
-                      </li>
-                    )) : <li>No operational records available.</li>}
-                  </ul>
-                </section>
-
-                <section className="panel blocks-panel">
-                  <div className="panel-header">
-                    <h2>Recommended blocks</h2>
-                  </div>
-                  <div className="block-stack">
-                    {viewModel.blocks.length ? viewModel.blocks.map((block) => (
-                      <div key={block.id} className={`block-card ${selectedBlock?.id === block.id ? 'selected' : ''}`}>
-                        <div className="block-title-row">
-                          <strong>{block.name}</strong>
-                          <span>{block.priority}</span>
-                        </div>
-                        <div>{block.section}</div>
-                        <div>{block.window}</div>
-                      </div>
-                    )) : <div>No operational records available.</div>}
-                  </div>
-                </section>
-
-                <section className="panel timeline-panel">
-                  <div className="panel-header">
-                    <h2>Timeline</h2>
-                  </div>
-                  <TimelineChart blocks={viewModel.blocks} trains={viewModel.trains} />
-                </section>
-
-                <section className="panel details-panel">
-                  <div className="panel-header">
-                    <h2>Recommendation details</h2>
-                  </div>
-                  {selectedBlock ? (
-                    <RecommendationDetails block={selectedBlock} details={viewModel.details} />
-                  ) : (
-                    <p>No operational records available.</p>
-                  )}
-                </section>
-              </>
-            )}
-
-            {activeTab === 'maintenance' && (
-              <section className="panel full-width-panel">
-                <div className="panel-header">
-                  <h2>Maintenance</h2>
-                </div>
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Type</th>
-                        <th>Section</th>
-                        <th>Route</th>
-                        <th>Priority</th>
-                        <th>Status</th>
-                        <th>Source</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {viewModel.tasks.length ? viewModel.tasks.map((task) => (
-                        <tr key={task.id}>
-                          <td>{task.id}</td>
-                          <td>{task.name}</td>
-                          <td>{task.section}</td>
-                          <td>{task.route}</td>
-                          <td>{task.priority}</td>
-                          <td><span className="status-chip">{task.status}</span></td>
-                          <td>{task.source}</td>
-                        </tr>
-                      )) : <tr><td colSpan={7}>No operational records available.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {activeTab === 'train' && (
-              <section className="panel full-width-panel">
-                <div className="panel-header">
-                  <h2>Train Plan</h2>
-                </div>
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Train</th>
-                        <th>Type</th>
-                        <th>Origin</th>
-                        <th>Destination</th>
-                        <th>Section</th>
-                        <th>Scheduled</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {viewModel.trains.length ? viewModel.trains.map((train) => (
-                        <tr key={train.id}>
-                          <td>{train.trainNo}</td>
-                          <td>{train.serviceType}</td>
-                          <td>{train.origin}</td>
-                          <td>{train.destination}</td>
-                          <td>{train.section}</td>
-                          <td>{train.window}</td>
-                          <td><span className="status-chip neutral">{train.status}</span></td>
-                        </tr>
-                      )) : <tr><td colSpan={7}>No train schedule available.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {activeTab === 'approvals' && (
-              <section className="panel full-width-panel">
-                <div className="panel-header">
-                  <h2>Approvals</h2>
-                </div>
-                <ApprovePanel data={viewModel.approvals} />
-              </section>
-            )}
-
-            <section className="panel approval-panel">
-              <div className="panel-header">
-                <h2>Human approval</h2>
-              </div>
-              <ApprovePanel data={viewModel.approvals} />
-            </section>
-          </>
-        )}
-      </main>
-    </div>
-  );
+  const [message, setMessage] = useState('');
+  const [hours, setHours] = useState(24);
+  const [crew, setCrew] = useState(10);
+  const load = () => { setStatus('loading'); fetchProductDashboard().then((next) => { setData(next); setStatus('ready'); }).catch((error: unknown) => { setMessage(error instanceof Error ? error.message : 'Backend unavailable'); setStatus('error'); }); };
+  useEffect(load, []);
+  const runPlan = () => { const start = new Date(); runOptimization({ available_hours: hours, available_crew: crew, planning_start: start.toISOString(), planning_end: new Date(start.getTime() + 86400000).toISOString() }).then((result) => { setRecommendations(result.recommendations); setPage('recommendations'); load(); }).catch((error: unknown) => setMessage(error instanceof Error ? error.message : 'Optimization failed')); };
+  const decide = (id: number, approved: boolean) => (approved ? approveRecommendation(id) : rejectRecommendation(id)).then((result) => { setRecommendations(result.recommendations); load(); }).catch((error: unknown) => setMessage(error instanceof Error ? error.message : 'Approval action failed'));
+  const selected = data?.requests.find((request) => request.id === selectedRequest);
+  return <div className="shell">
+    <header className="topbar"><div className="brand-mark"><span className="brand-line" />NEXUSRAIL <strong>CONTROL</strong></div><div className="topbar-title"><span className="eyebrow">Railway maintenance coordination</span><h1>{nav.find((item) => item.id === page)?.label}</h1></div><div className="system-state"><span className="pulse" /> Operational <small>Planning active</small></div></header>
+    <aside className="sidebar"><div className="sidebar-label">Workspace</div>{['Control room', 'Maintenance', 'Planning', 'Operations', 'Governance'].map((group) => <div key={group}><div className="nav-group">{group}</div>{nav.filter((item) => item.group === group).map((item) => <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} onClick={() => setPage(item.id)}>{item.label}<span>›</span></button>)}</div>)}<div className="sidebar-footer"><span className="pulse" />Demo network<br /><small>PostgreSQL connected</small></div></aside>
+    <main className="main-content">{message && <div className="notice" role="alert">{message}<button onClick={() => setMessage('')}>Dismiss</button></div>}{status === 'loading' && <div className="loading-state">Loading railway operations data...</div>}{status === 'error' && <div className="empty-state"><h2>Control room unavailable</h2><p>{message}</p><button className="primary" onClick={load}>Retry connection</button></div>}{status === 'ready' && data && <>{page === 'overview' && <Overview data={data} onNavigate={setPage} />}{page === 'requests' && <Requests data={data} selected={selected} onSelect={setSelectedRequest} />}{page === 'network' && <Network data={data} />}{page === 'planner' && <Planner hours={hours} crew={crew} setHours={setHours} setCrew={setCrew} runPlan={runPlan} recommendations={recommendations} />}{page === 'recommendations' && <Recommendations items={recommendations} onDecide={decide} />}{page === 'conflicts' && <Conflicts data={data} />}{page === 'approvals' && <Approvals items={recommendations.filter((item) => item.status === 'pending_review')} onDecide={decide} />}</>}</main>
+  </div>;
 }
+
+function Metric({ label, value, detail, tone = '' }: { label: string; value: string | number; detail: string; tone?: string }) { return <article className={`metric ${tone}`}><div className="metric-label">{label}</div><strong>{value}</strong><span>{detail}</span></article>; }
+function PanelTitle({ title, action, onClick }: { title: string; action?: string; onClick?: () => void }) { return <div className="panel-title"><h3>{title}</h3>{action && <button onClick={onClick}>{action} →</button>}</div>; }
+function Overview({ data, onNavigate }: { data: ProductDashboard; onNavigate: (page: Page) => void }) { return <><div className="page-intro"><div><span className="eyebrow">Network situation / live demo</span><h2>Good morning, planner.</h2><p>One operational view of requests, risk, conflicts, and recommended maintenance blocks.</p></div><button className="primary" onClick={() => onNavigate('planner')}>Open block planner <span>→</span></button></div><div className="metrics"><Metric label="Active requests" value={data.summary.active_requests} detail="Submitted or under review" /><Metric label="High priority" value={data.summary.high_priority_requests} detail="Priority score 75 or above" tone="critical" /><Metric label="Open conflicts" value={data.summary.conflicts} detail="Coordination action needed" tone="warning" /><Metric label="Recommended blocks" value={data.summary.recommended_blocks} detail="Awaiting planner review" tone="info" /></div><div className="dashboard-grid"><section className="panel wide"><PanelTitle title="Operational overview" action="View network" onClick={() => onNavigate('network')} /><div className="section-list">{data.sections.map((section) => <div className="section-row" key={section.id}><div className="route-node"><span className="node-dot" /><div><strong>{section.name}</strong><small>{section.section_code} · {section.route_name} · {section.length_km} km</small></div></div><div className="section-stat"><strong>{section.active_request_count}</strong><small>active requests</small></div><span className={`tag ${section.traffic_intensity === 'high' ? 'critical' : 'info'}`}>{section.traffic_intensity} traffic</span></div>)}</div></section><section className="panel"><PanelTitle title="Priority queue" action="All requests" onClick={() => onNavigate('requests')} /><div className="priority-list">{data.requests.slice(0, 4).map((request) => <button className="priority-row" key={request.id} onClick={() => onNavigate('requests')}><span className={`score ${scoreTone(request.priority_score)}`}>{request.priority_score}</span><span><strong>{request.title}</strong><small>{request.department} · {request.section_name}</small></span><span>›</span></button>)}</div></section><section className="panel wide"><PanelTitle title="Recent activity" action="Refresh" onClick={() => onNavigate('overview')} /><div className="activity-list">{data.recent_activity.map((item) => <div className="activity-row" key={item.label}><span className="activity-dot" /><div><strong>{item.label}</strong><small>{item.detail}</small></div><time>{formatDate(item.timestamp)}</time></div>)}</div></section><section className="panel status-panel"><PanelTitle title="System status" /><div className="system-row"><span><i className="status-ok" /> Database</span><strong>{data.summary.database_status}</strong></div><div className="system-row"><span><i className="status-ok" /> Optimization engine</span><strong>{data.summary.optimization_status}</strong></div><div className="system-row"><span><i className="status-warn" /> Approval queue</span><strong>{data.summary.approval_status}</strong></div></section></div></>; }
+function Requests({ data, selected, onSelect }: { data: ProductDashboard; selected?: ProductDashboard['requests'][number]; onSelect: (id: number) => void }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Maintenance / intake</span><h2>Maintenance requests</h2><p>Every request is linked to an asset, section, department, time window, and priority rationale.</p></div><div className="filter-chip">{data.requests.length} requests in view</div></div><section className="panel"><div className="table-wrap"><table><thead><tr><th>Request</th><th>Department</th><th>Asset / section</th><th>Requested window</th><th>Priority</th><th>Status</th></tr></thead><tbody>{data.requests.map((request) => <tr key={request.id} onClick={() => onSelect(request.id)}><td><strong>{request.request_code}</strong><small>{request.title}</small></td><td>{request.department}</td><td><strong>{request.asset_name}</strong><small>{request.section_name}</small></td><td>{formatDate(request.window_start)}<small>{request.estimated_duration_hours}h · {request.required_crew} crew</small></td><td><span className={`score ${scoreTone(request.priority_score)}`}>{request.priority_score} / 100</span></td><td><span className="tag info">{request.status}</span></td></tr>)}</tbody></table></div></section>{selected && <section className="panel detail-panel"><PanelTitle title={`${selected.request_code} · ${selected.title}`} /><div className="relationship"><span>Asset</span><strong>{selected.asset_name}</strong><span>Section</span><strong>{selected.section_name}</strong><span>Department</span><strong>{selected.department}</strong><span>Requested block</span><strong>{formatDate(selected.window_start)} to {formatDate(selected.window_end)}</strong></div><p>{selected.description}</p><h4>Why this priority?</h4><div className="factor-grid">{Object.entries(selected.priority_factors).map(([name, value]) => <div key={name}><small>{name}</small><strong>{value} / 100</strong><div className="bar"><i style={{ width: `${value}%` }} /></div></div>)}</div>{selected.conflicts.length > 0 && <div className="conflict-callout">{selected.conflicts[0].cause}<br /><strong>Suggested resolution:</strong> {selected.conflicts[0].resolution}</div>}</section>}</div>; }
+function Network({ data }: { data: ProductDashboard }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Operations / infrastructure</span><h2>Railway network</h2><p>Sections provide the geographic context for every asset and maintenance request.</p></div></div><div className="network-grid">{data.sections.map((section) => <article className="network-card" key={section.id}><div className="network-line"><span className="node-dot" /><span /><span className="node-dot" /></div><span className="eyebrow">{section.section_code}</span><h3>{section.name}</h3><p>{section.from_station} <b>→</b> {section.to_station}</p><div className="network-facts"><span>{section.length_km} km<small>section length</small></span><span>{section.asset_count}<small>tracked assets</small></span><span>{section.active_request_count}<small>active requests</small></span></div><span className={`tag ${section.traffic_intensity === 'high' ? 'critical' : 'info'}`}>{section.traffic_intensity} traffic · {section.operational_importance} importance</span></article>)}</div></div>; }
+function Planner({ hours, crew, setHours, setCrew, runPlan, recommendations }: { hours: number; crew: number; setHours: (value: number) => void; setCrew: (value: number) => void; runPlan: () => void; recommendations: Recommendation[] }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Planning / optimization</span><h2>Block planner</h2><p>Set the available maintenance capacity, then generate a transparent recommendation.</p></div><button className="primary" onClick={runPlan}>Run optimization <span>↗</span></button></div><section className="planner-controls panel"><label>Available maintenance hours<input type="number" value={hours} onChange={(event) => setHours(Number(event.target.value))} /></label><label>Available crew<input type="number" value={crew} onChange={(event) => setCrew(Number(event.target.value))} /></label><div className="objective"><span className="eyebrow">Objective</span><strong>Maximize critical work completed</strong><small>Subject to block capacity, crew availability, request windows, and train occupancy.</small></div></section><section className="panel"><PanelTitle title="Planning timeline" action={recommendations.length ? `${recommendations.length} recommendations` : 'No run yet'} /><div className="timeline"><div className="timeline-hours"><span>Now</span><span>+06h</span><span>+12h</span><span>+18h</span><span>+24h</span></div>{recommendations.length ? recommendations.map((item) => <div className="timeline-row" key={item.id}><strong>{item.section_code}</strong><div className="track"><div className="block"><b>{item.recommendation_code}</b><small>{item.request_codes.join(' + ')}</small></div></div></div>) : <div className="timeline-empty">Run the optimizer to place compatible requests against the maintenance window.</div>}</div></section></div>; }
+function Recommendations({ items, onDecide }: { items: Recommendation[]; onDecide: (id: number, approved: boolean) => void }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Planning / solver output</span><h2>Recommendations</h2><p>Each recommendation explains what was grouped, where it happens, and the expected operating impact.</p></div></div>{items.length === 0 ? <div className="empty-state panel"><h3>No recommendations yet</h3><p>Run the block planner to generate a plan from current requests.</p></div> : items.map((item) => <article className="recommendation panel" key={item.id}><div className="recommendation-head"><div><span className="eyebrow">{item.recommendation_code}</span><h3>{item.section_name}</h3><p>{item.route_name} · {formatDate(item.recommended_start)} - {formatDate(item.recommended_end)}</p></div><span className={`score ${scoreTone(item.priority_score)}`}>{item.priority_score}<small> priority captured</small></span></div><div className="recommendation-facts"><span><small>Requests grouped</small><strong>{item.request_codes.join(' + ')}</strong></span><span><small>Duration</small><strong>{item.duration_hours} hours</strong></span><span><small>Train impact</small><strong>{item.train_count} movements · {item.operational_impact}</strong></span></div><p className="explanation">{item.explanation}</p>{item.status === 'pending_review' && <div className="actions"><button className="primary" onClick={() => onDecide(item.id, true)}>Approve plan</button><button className="secondary" onClick={() => onDecide(item.id, false)}>Reject</button></div>}<span className="tag info">{item.status}</span></article>)}</div>; }
+function Conflicts({ data }: { data: ProductDashboard }) { const conflicts = data.requests.flatMap((request) => request.conflicts.map((conflict) => ({ ...conflict, code: request.request_code, title: request.title }))); return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Operations / coordination</span><h2>Conflicts</h2><p>Resolve overlapping requests before they become separate disruptive blocks.</p></div></div>{conflicts.map((conflict) => <article className="panel conflict-item" key={`${conflict.code}-${conflict.cause}`}><span className="tag critical">{conflict.severity} · overlap</span><h3>{conflict.code} · {conflict.title}</h3><p>{conflict.cause}</p><strong>Suggested resolution:</strong> {conflict.resolution}</article>)}</div>; }
+function Approvals({ items, onDecide }: { items: Recommendation[]; onDecide: (id: number, approved: boolean) => void }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Governance / human review</span><h2>Pending approvals</h2><p>The optimization engine recommends. A planner decides what enters the final block plan.</p></div></div><Recommendations items={items} onDecide={onDecide} /></div>; }
 
 export default App;

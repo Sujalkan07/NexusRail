@@ -7,9 +7,11 @@ from app.api.routes import (
     tdms_equipment,
     tms_defects,
     train_schedule,
+    planning,
 )
 from app.core.database import engine
 from app.models.base import Base
+import app.models.planning  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,3 +35,4 @@ app.include_router(smms_failures.router, prefix="/api/v1")
 app.include_router(tdms_equipment.router, prefix="/api/v1")
 app.include_router(train_schedule.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(planning.router, prefix="/api/v1")
